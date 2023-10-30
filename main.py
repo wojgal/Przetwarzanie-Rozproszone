@@ -19,9 +19,9 @@ THIEVES_AMOUNT = comm.Get_size()
 EQUIPMENT_AMOUNT = 1
 LABORATORY_AMOUNT = 1
 MIN_CITY_TIME = 1
-MAX_CITY_TIME = 10
+MAX_CITY_TIME = 5
 GOOD_MOOD_PROBABILITY = 0.5
-EQUIPMENT_RECOVERY_TIME = 10
+EQUIPMENT_RECOVERY_TIME = 5
 
 
 # Wypisywanie wykonywanych dzialan
@@ -72,6 +72,11 @@ def send_release(critical_section_name, lamport_clk):
     bcast(msg, rank)
 
 
+def send_enter(critical_section_name, lamport_clk):
+    msg = f'ENT {critical_section_name} {lamport_clk}'
+    bcast(msg, rank)
+
+
 # Ladowanie sie ekwipunku
 def charge_equipment(lamport_clk):
     print('\t< Ladowanie sprzetu >\t\n')
@@ -82,7 +87,9 @@ def charge_equipment(lamport_clk):
 
 
 # Krazenie po miescie przez kradzieja
-def city_moving():
+def city_moving(lamport_clk):
+    print_message('Kraze po miescie', lamport_clk)
+
     while True:
         moving_time = random.randint(MIN_CITY_TIME, MAX_CITY_TIME)
         time.sleep(moving_time)
@@ -90,18 +97,28 @@ def city_moving():
         if random.random() < GOOD_MOOD_PROBABILITY:
             break
 
+    print_message('Znajduje dobry humor', lamport_clk)
+
+
+# Sortowanie do kolejek wzgledem ich wartosci w lamport clk a potem wedlug rank
+def sorting_key(msg_tuple):
+    author_rank, msg = msg_tuple
+    lamport_clk = int(msg.split()[2])
+
+    return (lamport_clk, author_rank)
+
+
 
 
 # Usuwanie komunikatu z kolejki
-def drop_from_queue(queue=[], author_rank = None, message_type=None):
+def drop_from_queue(queue=[], author_rank = None):
     for msg in queue:
-        auth_rank = msg[0]
-        msg_type, _, __ = msg[1].split()
-
-        if auth_rank == author_rank and msg_type == message_type:
+        if msg[0] == author_rank:
             queue.remove(msg)
-            return
-        
+            break
+
+
+
 
 # Sprawdzenie dostepnosci w gornej czesci kolejki
 def check_top_queue(queue=[], top=0):
@@ -115,6 +132,7 @@ def check_top_queue(queue=[], top=0):
 
 
 if __name__ == '__main__':
+
     lamport_clk = 0
     weapon_flag = 'Released'
     laboratory_flag = 'Released'
@@ -150,30 +168,39 @@ if __name__ == '__main__':
                     ack_amount += 1
                     print_message(f'Otrzymano potwierdzenie od {author_rank}', lamport_clk)
 
-            #zajebane 1 do 1, chuj wie czy dziala
             elif msg_type == 'REQ':
                 if cs_name == 'WEAPON':
-                    if weapon_flag == 'Held' or lamport_clk < author_clk or (lamport_clk == author_clk and rank < author_rank):
+                    if weapon_flag == 'Held': #or lamport_clk < author_clk or (lamport_clk == author_clk and rank < author_rank):
                         weapon_queue.append(msg)
 
                     else:
+                        weapon_queue.append(msg)
                         send_ack('WEAPON', lamport_clk, author_rank)
-                        weapon_amount -= 1
                         lamport_clk += 1
                         print_message(f'Wyslanie ack WEAPON do {author_rank}', lamport_clk)
 
                 elif cs_name == 'LABORATORY':
-                    if laboratory_flag == 'Held' or lamport_clk < author_clk or (lamport_clk == author_clk and rank < author_rank):
+                    if laboratory_flag == 'Held': #or lamport_clk < author_clk or (lamport_clk == author_clk and rank < author_rank):
                         laboratory_queue.append(msg)
 
                     else:
+                        laboratory_queue.append(msg)
                         send_ack('LABORATORY', lamport_clk, author_rank)
                         lamport_clk += 1
                         print_message(f'Wyslanie ack LABORATORY do {author_rank}', lamport_clk)
 
+            elif msg_type == 'ENT':
+                if cs_name == 'WEAPON':
+                    weapon_amount -= 1
+
+                elif cs_name == 'LABORATORY':
+                    laboratory_amount -= 1
+
+        weapon_queue = sorted(weapon_queue, key=sorting_key)
+        laboratory_queue = sorted(laboratory_queue, key=sorting_key)
         # Kradziej chce pozyskac bron
         if weapon_flag == 'Released':
-            weapon_queue.append((rank, f'ACK WEAPON {lamport_clk}'))
+            weapon_queue.append((rank, f'REQ WEAPON {lamport_clk}'))
             send_request('WEAPON', lamport_clk)
             print_message('Chce wejsc do sekcji WEAPON', lamport_clk)
 
@@ -182,11 +209,11 @@ if __name__ == '__main__':
         
         # Kradziej pozyskuje bron
         elif weapon_flag == 'Wanted':
-            if rank == 0: 
-                print(weapon_queue)
             if ack_amount >= THIEVES_AMOUNT - weapon_amount and weapon_amount > 0 and check_top_queue(weapon_queue, weapon_amount):
+                print(rank, ack_amount, weapon_amount, weapon_queue)
                 lamport_clk += 1
                 print_message('Wchodze do sekcji krytycznej WEAPON', lamport_clk)
+                send_enter('WEAPON', lamport_clk)
 
                 weapon_amount -= 1
                 ack_amount = 0
@@ -194,10 +221,10 @@ if __name__ == '__main__':
 
         # Kradziej szuka humoru
         elif weapon_flag == 'Held' and laboratory_flag == 'Released':
-            print_message('Kraze po miescie', lamport_clk)
-            city_moving()
+            city_moving(lamport_clk)
 
-            laboratory_queue.append((rank, f'ACK WEAPON {lamport_clk}'))
+            print_message('Chce wejsc do sekcji krytycznej LABORATORY', lamport_clk)
+            laboratory_queue.append((rank, f'REQ LABORATORY {lamport_clk}'))
             send_request('LABORATORY', lamport_clk)
             
             ack_amount = 1
@@ -205,16 +232,20 @@ if __name__ == '__main__':
 
         # Kradziej chce dostac sie do laboratorium
         elif weapon_flag == 'Held' and laboratory_flag == 'Wanted':
+            print(ack_amount, laboratory_amount, laboratory_queue)
             if ack_amount >= THIEVES_AMOUNT - laboratory_amount and laboratory_amount > 0 and check_top_queue(laboratory_queue, laboratory_amount):
 
                 lamport_clk += 1
                 print_message('Wchodzi do sekcji krytycznej LABORATORY', lamport_clk)
+                send_enter('LABORATORY', lamport_clk)
                 print('\t< WYPRODUKOWANO GUME >\t')
                 lamport_clk += 1
                 print_message('Wychodzi z sekcji krytycznej LABORATORY', lamport_clk)
+                send_release('LABORATORY', lamport_clk)
 
                 ack_amount = 0
 
+                '''
                 #zajebane 1 do 1 moze nie dzialac
                 for msg in laboratory_queue:
                     author_rank = msg[0]
@@ -231,9 +262,11 @@ if __name__ == '__main__':
                     
                     lamport_clk = max(lamport_clk, author_clk) + 1
                     print_message('Wyslanie ack ', lamport_clk)
+                '''    
 
-                weapon_queue.clear()
-                laboratory_queue.clear()
+
+                drop_from_queue(weapon_queue, rank)
+                drop_from_queue(laboratory_queue, rank)
 
                 chare_thread = threading.Thread(target=lambda: charge_equipment(lamport_clk))
                 chare_thread.start()
