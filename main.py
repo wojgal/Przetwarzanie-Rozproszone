@@ -1,5 +1,4 @@
 from mpi4py import MPI
-from time import sleep
 from colorama import init
 import os
 from termcolor import colored
@@ -16,12 +15,15 @@ color_list = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'bla
 color = color_list[rank]
 
 THIEVES_AMOUNT = comm.Get_size()
-EQUIPMENT_AMOUNT = 1
+
+WEAPON_AMOUNT = 1
 LABORATORY_AMOUNT = 1
+
 MIN_CITY_TIME = 1
 MAX_CITY_TIME = 5
 GOOD_MOOD_PROBABILITY = 0.5
-EQUIPMENT_RECOVERY_TIME = 5
+WEAPON_RECOVERY_TIME = 5
+
 
 
 # Wypisywanie wykonywanych dzialan
@@ -44,11 +46,13 @@ def get_messages():
             return messages
         
 
-# Broadcast do wszystkich
+
+# Broadcast do wszystkich po za sobą
 def bcast(message):
-    for dest_id in range(4):
+    for dest_id in range(THIEVES_AMOUNT):
         if dest_id == rank:
             continue
+
         comm.send(message, dest=dest_id)
 
 
@@ -59,6 +63,7 @@ def send_request(critical_section_name, lamport_clk):
     bcast(msg)
 
 
+
 # Wysylanie ack
 def send_ack(critical_section_name, lamport_clk, destination_id):
     msg = f'ACK {critical_section_name} {lamport_clk}'
@@ -66,24 +71,26 @@ def send_ack(critical_section_name, lamport_clk, destination_id):
     
 
 
-# Wysyłanie realease
+# Wysyłanie release
 def send_release(critical_section_name, lamport_clk):
     msg = f'REL {critical_section_name} {lamport_clk}'
     bcast(msg)
 
 
+
+# Wysylanie informacji o wejsciu do sekcji krytycznej
 def send_enter(critical_section_name, lamport_clk):
     msg = f'ENT {critical_section_name} {lamport_clk}'
     bcast(msg)
 
 
-# Ladowanie sie ekwipunku
+
+# Ladowanie sie broni
 def charge_equipment(lamport_clk):
     print('\t< Ladowanie sprzetu >\t\n')
-    time.sleep(EQUIPMENT_RECOVERY_TIME)
+    time.sleep(WEAPON_RECOVERY_TIME)
     send_release('WEAPON', lamport_clk)
     print('\t< Sprzet naladowany >\t\n')
-    weapon_amount += 1
 
 
 
@@ -101,6 +108,7 @@ def city_moving(lamport_clk):
     print_message('Znajduje dobry humor', lamport_clk)
 
 
+
 # Sortowanie do kolejek wzgledem ich wartosci w lamport clk a potem wedlug rank
 def sorting_key(msg_tuple):
     author_rank, msg = msg_tuple
@@ -110,14 +118,12 @@ def sorting_key(msg_tuple):
 
 
 
-
 # Usuwanie komunikatu z kolejki
 def drop_from_queue(queue=[], author_rank = None):
     for msg in queue:
         if msg[0] == author_rank:
             queue.remove(msg)
             break
-
 
 
 
@@ -131,31 +137,34 @@ def check_top_queue(queue=[], top=0):
     
 
 
-
 if __name__ == '__main__':
 
-    lamport_clk = 0
     weapon_flag = 'Released'
     laboratory_flag = 'Released'
-    weapon_amount = EQUIPMENT_AMOUNT
-    laboratory_amount = LABORATORY_AMOUNT
-    chare_thread = None
 
+    weapon_amount = WEAPON_AMOUNT
+    laboratory_amount = LABORATORY_AMOUNT
+
+    lamport_clk = 0
     ack_amount = 0
+    charge_thread = None
+
     weapon_queue = []
     laboratory_queue = []
 
-    # Czytanie wszystkich wiadomosci
+    # Rozpoczynanie zycia procesow
     while True:
         time.sleep(0.25)
 
         messages = get_messages()
 
+        # Czytanie wszystkich wiadomosci
         for msg in messages:
             author_rank = msg[0]
             msg_type, cs_name, author_clk = msg[1].split()
             author_clk = int(author_clk)
 
+            # Obsluga release
             if msg_type == 'REL':
                 if cs_name == 'WEAPON':
                     weapon_amount += 1
@@ -165,14 +174,16 @@ if __name__ == '__main__':
                     laboratory_amount += 1
                     drop_from_queue(laboratory_queue, author_rank)
 
+            # Obsluga acknowledge
             elif msg_type == 'ACK':
                 if weapon_flag == 'Wanted' or laboratory_flag == 'Wanted':
                     ack_amount += 1
                     print_message(f'Otrzymano potwierdzenie od {author_rank}', lamport_clk)
 
+            # Obsluga request
             elif msg_type == 'REQ':
                 if cs_name == 'WEAPON':
-                    if weapon_flag == 'Held': #or lamport_clk < author_clk or (lamport_clk == author_clk and rank < author_rank):
+                    if weapon_flag == 'Held':
                         weapon_queue.append(msg)
 
                     else:
@@ -182,7 +193,7 @@ if __name__ == '__main__':
                         print_message(f'Wyslanie ack WEAPON do {author_rank}', lamport_clk)
 
                 elif cs_name == 'LABORATORY':
-                    if laboratory_flag == 'Held': #or lamport_clk < author_clk or (lamport_clk == author_clk and rank < author_rank):
+                    if laboratory_flag == 'Held':
                         laboratory_queue.append(msg)
 
                     else:
@@ -191,6 +202,7 @@ if __name__ == '__main__':
                         lamport_clk += 1
                         print_message(f'Wyslanie ack LABORATORY do {author_rank}', lamport_clk)
 
+            # Obsluga enter
             elif msg_type == 'ENT':
                 if cs_name == 'WEAPON':
                     weapon_amount -= 1
@@ -198,8 +210,10 @@ if __name__ == '__main__':
                 elif cs_name == 'LABORATORY':
                     laboratory_amount -= 1
 
+        #Sortowanie kolejek wzgledem ich lamport_clk
         weapon_queue = sorted(weapon_queue, key=sorting_key)
         laboratory_queue = sorted(laboratory_queue, key=sorting_key)
+
         # Kradziej chce pozyskac bron
         if weapon_flag == 'Released':
             weapon_queue.append((rank, f'REQ WEAPON {lamport_clk}'))
@@ -211,9 +225,7 @@ if __name__ == '__main__':
         
         # Kradziej pozyskuje bron
         elif weapon_flag == 'Wanted':
-            #print('BEFORE', rank, ack_amount, weapon_amount, weapon_queue)
             if ack_amount >= THIEVES_AMOUNT - weapon_amount and weapon_amount > 0 and check_top_queue(weapon_queue, weapon_amount):
-                print(rank, ack_amount, weapon_amount, weapon_queue)
                 lamport_clk += 1
                 print_message('Wchodze do sekcji krytycznej WEAPON', lamport_clk)
                 send_enter('WEAPON', lamport_clk)
@@ -235,9 +247,7 @@ if __name__ == '__main__':
 
         # Kradziej chce dostac sie do laboratorium
         elif weapon_flag == 'Held' and laboratory_flag == 'Wanted':
-           
             if ack_amount >= THIEVES_AMOUNT - laboratory_amount and laboratory_amount > 0 and check_top_queue(laboratory_queue, laboratory_amount):
-                print(ack_amount, laboratory_amount, laboratory_queue)
                 lamport_clk += 1
                 print_message('Wchodzi do sekcji krytycznej LABORATORY', lamport_clk)
                 send_enter('LABORATORY', lamport_clk)
@@ -248,31 +258,12 @@ if __name__ == '__main__':
 
                 ack_amount = 0
 
-                '''
-                #zajebane 1 do 1 moze nie dzialac
-                for msg in laboratory_queue:
-                    author_rank = msg[0]
-                    msg_type, cs_name, author_clk = msg[1].split()
-                    author_clk = int(author_clk)
-
-                    if author_rank == rank:
-                        continue
-
-                    send_ack('LABORATORY', lamport_clk, author_rank)
-
-                    if cs_name == 'kckef':
-                        weapon_amount -= 1
-                    
-                    lamport_clk = max(lamport_clk, author_clk) + 1
-                    print_message('Wyslanie ack ', lamport_clk)
-                '''    
-
-
                 drop_from_queue(weapon_queue, rank)
                 drop_from_queue(laboratory_queue, rank)
 
-                chare_thread = threading.Thread(target=lambda: charge_equipment(lamport_clk))
-                chare_thread.start()
+                #Tworzenie watku ladujacego bron
+                charge_thread = threading.Thread(target=lambda: charge_equipment(lamport_clk))
+                charge_thread.start()
 
                 lamport_clk += 1
                 print_message('Wychodzi z sekcji krytyczne WEAPON', lamport_clk)
@@ -280,10 +271,14 @@ if __name__ == '__main__':
                 weapon_flag = 'Released'
                 laboratory_flag = 'Released'
 
-        if chare_thread is not None:
-            if not chare_thread.is_alive():
-                chare_thread = None
-                weapon_amount += 1
+        # Sprawdzanie czy watek sie zakonczyl, jezeli tak, to dodajemy do naszego glownego procesu zwolnienie weapon
+        if charge_thread is not None:
+            if not charge_thread.is_alive():
+                try:
+                    charge_thread = None
+                    weapon_amount += 1
+                except:
+                    pass
 
 
 
