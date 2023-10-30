@@ -45,7 +45,7 @@ def get_messages():
         
 
 # Broadcast do wszystkich
-def bcast(message, rank):
+def bcast(message):
     for dest_id in range(4):
         if dest_id == rank:
             continue
@@ -56,7 +56,7 @@ def bcast(message, rank):
 # Wysylanie req
 def send_request(critical_section_name, lamport_clk):
     msg = f'REQ {critical_section_name} {lamport_clk}'
-    bcast(msg, rank)
+    bcast(msg)
 
 
 # Wysylanie ack
@@ -69,12 +69,12 @@ def send_ack(critical_section_name, lamport_clk, destination_id):
 # Wysyłanie realease
 def send_release(critical_section_name, lamport_clk):
     msg = f'REL {critical_section_name} {lamport_clk}'
-    bcast(msg, rank)
+    bcast(msg)
 
 
 def send_enter(critical_section_name, lamport_clk):
     msg = f'ENT {critical_section_name} {lamport_clk}'
-    bcast(msg, rank)
+    bcast(msg)
 
 
 # Ladowanie sie ekwipunku
@@ -83,6 +83,7 @@ def charge_equipment(lamport_clk):
     time.sleep(EQUIPMENT_RECOVERY_TIME)
     send_release('WEAPON', lamport_clk)
     print('\t< Sprzet naladowany >\t\n')
+    weapon_amount += 1
 
 
 
@@ -138,6 +139,7 @@ if __name__ == '__main__':
     laboratory_flag = 'Released'
     weapon_amount = EQUIPMENT_AMOUNT
     laboratory_amount = LABORATORY_AMOUNT
+    chare_thread = None
 
     ack_amount = 0
     weapon_queue = []
@@ -209,6 +211,7 @@ if __name__ == '__main__':
         
         # Kradziej pozyskuje bron
         elif weapon_flag == 'Wanted':
+            #print('BEFORE', rank, ack_amount, weapon_amount, weapon_queue)
             if ack_amount >= THIEVES_AMOUNT - weapon_amount and weapon_amount > 0 and check_top_queue(weapon_queue, weapon_amount):
                 print(rank, ack_amount, weapon_amount, weapon_queue)
                 lamport_clk += 1
@@ -232,9 +235,9 @@ if __name__ == '__main__':
 
         # Kradziej chce dostac sie do laboratorium
         elif weapon_flag == 'Held' and laboratory_flag == 'Wanted':
-            print(ack_amount, laboratory_amount, laboratory_queue)
+           
             if ack_amount >= THIEVES_AMOUNT - laboratory_amount and laboratory_amount > 0 and check_top_queue(laboratory_queue, laboratory_amount):
-
+                print(ack_amount, laboratory_amount, laboratory_queue)
                 lamport_clk += 1
                 print_message('Wchodzi do sekcji krytycznej LABORATORY', lamport_clk)
                 send_enter('LABORATORY', lamport_clk)
@@ -257,7 +260,7 @@ if __name__ == '__main__':
 
                     send_ack('LABORATORY', lamport_clk, author_rank)
 
-                    if cs_name == 'WEAPON':
+                    if cs_name == 'kckef':
                         weapon_amount -= 1
                     
                     lamport_clk = max(lamport_clk, author_clk) + 1
@@ -277,6 +280,10 @@ if __name__ == '__main__':
                 weapon_flag = 'Released'
                 laboratory_flag = 'Released'
 
+        if chare_thread is not None:
+            if not chare_thread.is_alive():
+                chare_thread = None
+                weapon_amount += 1
 
 
 
